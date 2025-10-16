@@ -1,0 +1,463 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  SUPERVISOR
+  FINANCE
+  EMPLOYEE
+  VIEWER
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskPhase {
+  PLANNING
+  DESIGN
+  CONSTRUCTION
+  INSPECTION
+  COMPLETION
+}
+
+enum IssueStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum IssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum PurchaseOrderType {
+  REQUEST
+  PO
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  RECEIVED
+  PARTIALLY_RECEIVED
+  COMPLETED
+  CANCELLED
+}
+
+enum ExpenseCategory {
+  MATERIALS
+  LABOR
+  EQUIPMENT
+  TRANSPORT
+  UTILITIES
+  OTHER
+}
+
+enum InvoiceType {
+  PROGRESS
+  FINAL
+  RETAINAGE
+  CHANGE_ORDER
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  CHECK
+  BANK_TRANSFER
+  CARD
+  OTHER
+}
+
+enum TimesheetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String?
+  role          UserRole  @default(EMPLOYEE)
+  image         String?
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  employee            Employee?
+  managedProjects     Project[] @relation("ProjectManager")
+  assignedTasks       Task[]    @relation("TaskAssignee")
+  createdIssues       Issue[]   @relation("IssueCreator")
+  assignedIssues      Issue[]   @relation("IssueAssignee")
+  createdPurchaseOrders PurchaseOrder[] @relation("PurchaseOrderCreator")
+  createdExpenses     Expense[] @relation("ExpenseCreator")
+  createdInvoices     Invoice[] @relation("InvoiceCreator")
+  payments            Payment[]
+  timesheets          Timesheet[]
+
+  @@map("users")
+}
+
+model Employee {
+  id         String  @id @default(cuid())
+  userId     String  @unique
+  hourlyRate Decimal @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("employees")
+}
+
+model Client {
+  id          String   @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  address     String?
+  contactName String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  projects Project[]
+
+  @@map("clients")
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  status      ProjectStatus @default(PLANNING)
+  budget      Decimal?      @db.Decimal(15, 2)
+  actualCost  Decimal?      @db.Decimal(15, 2) @default(0)
+  percentComplete Decimal?   @db.Decimal(5, 2) @default(0)
+  startDate   DateTime?
+  endDate     DateTime?
+  clientId    String
+  managerId   String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  client         Client           @relation(fields: [clientId], references: [id])
+  manager        User             @relation("ProjectManager", fields: [managerId], references: [id])
+  tasks          Task[]
+  issues         Issue[]
+  expenses       Expense[]
+  invoices       Invoice[]
+  timesheets     Timesheet[]
+
+  @@index([clientId])
+  @@index([managerId])
+  @@index([status])
+  @@map("projects")
+}
+
+model Task {
+  id            String       @id @default(cuid())
+  title         String
+  description   String?
+  status        TaskStatus   @default(TODO)
+  priority      TaskPriority @default(MEDIUM)
+  phase         TaskPhase    @default(PLANNING)
+  estimatedHours Decimal?    @db.Decimal(8, 2)
+  loggedHours   Decimal?     @db.Decimal(8, 2) @default(0)
+  dueDate       DateTime?
+  projectId     String
+  assigneeId    String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  // Relations
+  project           Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee          User?              @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  dependencies      TaskDependency[]   @relation("DependentTask")
+  dependents        TaskDependency[]   @relation("DependencyTask")
+  timesheets        Timesheet[]
+
+  @@unique([title, projectId])
+  @@index([projectId])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("tasks")
+}
+
+model TaskDependency {
+  id              String @id @default(cuid())
+  dependentTaskId String
+  dependencyTaskId String
+  createdAt       DateTime @default(now())
+
+  // Relations
+  dependentTask  Task @relation("DependentTask", fields: [dependentTaskId], references: [id], onDelete: Cascade)
+  dependencyTask Task @relation("DependencyTask", fields: [dependencyTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([dependentTaskId, dependencyTaskId])
+  @@map("task_dependencies")
+}
+
+model Issue {
+  id          String        @id @default(cuid())
+  title       String
+  description String?
+  status      IssueStatus   @default(OPEN)
+  severity    IssueSeverity @default(MEDIUM)
+  dueDate     DateTime?
+  location    String?
+  projectId   String
+  assigneeId  String?
+  createdById String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee  User?   @relation("IssueAssignee", fields: [assigneeId], references: [id])
+  createdBy User    @relation("IssueCreator", fields: [createdById], references: [id])
+
+  @@unique([title, projectId])
+  @@index([projectId])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("issues")
+}
+
+model Supplier {
+  id          String   @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  address     String?
+  contactName String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  purchaseOrders PurchaseOrder[]
+
+  @@map("suppliers")
+}
+
+model InventoryItem {
+  id          String  @id @default(cuid())
+  sku         String  @unique
+  name        String
+  description String?
+  uom         String  // Unit of Measure
+  onHand      Decimal @db.Decimal(10, 2) @default(0)
+  minQty      Decimal @db.Decimal(10, 2) @default(0)
+  lastPrice   Decimal? @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  purchaseOrderItems PurchaseOrderItem[]
+
+  @@index([sku])
+  @@map("inventory_items")
+}
+
+model PurchaseOrder {
+  id          String              @id @default(cuid())
+  type        PurchaseOrderType
+  status      PurchaseOrderStatus @default(DRAFT)
+  poNumber    String?             @unique
+  total       Decimal             @db.Decimal(15, 2) @default(0)
+  currency    String              @default("GBP")
+  eta         DateTime?
+  supplierId  String
+  createdById String
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  // Relations
+  supplier Supplier            @relation(fields: [supplierId], references: [id])
+  createdBy User               @relation("PurchaseOrderCreator", fields: [createdById], references: [id])
+  items     PurchaseOrderItem[]
+
+  @@index([supplierId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String  @id @default(cuid())
+  quantity        Decimal @db.Decimal(10, 2)
+  price           Decimal @db.Decimal(10, 2)
+  taxRate         Decimal @db.Decimal(5, 2) @default(0)
+  purchaseOrderId String
+  inventoryItemId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@index([purchaseOrderId])
+  @@map("purchase_order_items")
+}
+
+model Expense {
+  id          String         @id @default(cuid())
+  description String
+  category    ExpenseCategory
+  amount      Decimal        @db.Decimal(10, 2)
+  vatRate     Decimal        @db.Decimal(5, 2) @default(0)
+  expenseDate DateTime
+  receiptUrl  String?
+  projectId   String
+  createdById String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // Relations
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User    @relation("ExpenseCreator", fields: [createdById], references: [id])
+
+  @@index([projectId])
+  @@index([category])
+  @@index([expenseDate])
+  @@map("expenses")
+}
+
+model Invoice {
+  id          String        @id @default(cuid())
+  number      String        @unique
+  type        InvoiceType
+  status      InvoiceStatus @default(DRAFT)
+  issueDate   DateTime
+  dueDate     DateTime
+  currency    String        @default("GBP")
+  total       Decimal       @db.Decimal(15, 2)
+  balance     Decimal       @db.Decimal(15, 2)
+  projectId   String
+  clientId    String
+  createdById String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  project Project         @relation(fields: [projectId], references: [id])
+  client  Client          @relation(fields: [clientId], references: [id])
+  createdBy User          @relation("InvoiceCreator", fields: [createdById], references: [id])
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@index([projectId])
+  @@index([clientId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id        String  @id @default(cuid())
+  quantity  Decimal @db.Decimal(10, 2)
+  unitPrice Decimal @db.Decimal(10, 2)
+  taxRate   Decimal @db.Decimal(5, 2) @default(0)
+  invoiceId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  amount    Decimal       @db.Decimal(15, 2)
+  method    PaymentMethod
+  reference String?
+  invoiceId String
+  userId    String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+model Timesheet {
+  id        String         @id @default(cuid())
+  dateWorked DateTime
+  hours     Decimal        @db.Decimal(8, 2)
+  rate      Decimal        @db.Decimal(10, 2)
+  status    TimesheetStatus @default(DRAFT)
+  projectId String
+  taskId    String?
+  userId    String
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task    Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([dateWorked])
+  @@map("timesheets")
+}
